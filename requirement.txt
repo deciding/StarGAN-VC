@@ -1,0 +1,8 @@
+torch==1.0.0
+pyworld
+tqdm
+librosa
+tensorboardX
+tensorboard
+torch-vision
+Pillow
