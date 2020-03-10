@@ -3,6 +3,7 @@ import numpy as np
 #import os
 import pyworld
 
+#TODO: understand how to use world vocoder
 
 def load_wav(wav_file, sr):
     wav, _ = librosa.load(wav_file, sr=sr, mono=True)

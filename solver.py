@@ -110,9 +110,11 @@ class Solver(object):
 
     def reset_grad(self):
         """Reset the gradient buffers."""
+        """Every time a variable is back propogated through, the gradient will be accumulated instead of being replaced. (This makes it easier for rnn, because each module will be back propogated through several times.)"""
         self.g_optimizer.zero_grad()
         self.d_optimizer.zero_grad()
 
+    #unused in train
     def denorm(self, x):
         """Convert the range from [-1, 1] to [0, 1]."""
         out = (x + 1) / 2
@@ -126,12 +128,13 @@ class Solver(object):
                                    grad_outputs=weight,
                                    retain_graph=True,
                                    create_graph=True,
-                                   only_inputs=True)[0]
+                                   only_inputs=True)[0] #TODO why [0]
 
         dydx = dydx.view(dydx.size(0), -1)
         dydx_l2norm = torch.sqrt(torch.sum(dydx**2, dim=1))
         return torch.mean((dydx_l2norm-1)**2)
 
+    #unused in train
     def label2onehot(self, labels, dim):
         """Convert label indices to one-hot vectors."""
         batch_size = labels.size(0)
@@ -189,6 +192,7 @@ class Solver(object):
 
             # Fetch labels.
             try:
+                # [B, D, T], [B], [B, C]
                 mc_real, spk_label_org, spk_c_org = next(data_iter)
             except:
                 data_iter = iter(train_loader)
@@ -198,6 +202,7 @@ class Solver(object):
 
             # Generate target domain labels randomly.
             # spk_label_trg: int,   spk_c_trg:one-hot representation 
+            # [B], [B, C]
             spk_label_trg, spk_c_trg = self.sample_spk_c(mc_real.size(0))
 
             mc_real = mc_real.to(self.device)                         # Input mc.
@@ -210,14 +215,15 @@ class Solver(object):
             #                             2. Train the discriminator                              #
             # =================================================================================== #
 
+            # use WGAN_GP critic
             # Compute loss with real mc feats.
             out_src, out_cls_spks = self.D(mc_real)
-            d_loss_real = - torch.mean(out_src)
+            d_loss_real = - torch.mean(out_src) # TODO: no input class
             d_loss_cls_spks = self.classification_loss(out_cls_spks, spk_label_org)
 
             # Compute loss with fake mc feats.
             mc_fake = self.G(mc_real, spk_c_trg)
-            out_src, out_cls_spks = self.D(mc_fake.detach())
+            out_src, out_cls_spks = self.D(mc_fake.detach()) # detach means not updating gradient in G
             d_loss_fake = torch.mean(out_src)
 
             # Compute loss for gradient penalty.
@@ -236,8 +242,8 @@ class Solver(object):
             loss = {}
             loss['D/loss_real'] = d_loss_real.item()
             loss['D/loss_fake'] = d_loss_fake.item()
-            loss['D/loss_cls_spks'] = d_loss_cls_spks.item()
-            loss['D/loss_gp'] = d_loss_gp.item()
+            loss['C/loss_cls_spks'] = d_loss_cls_spks.item()
+            loss['D/loss_gradient_penalty'] = d_loss_gp.item()
 
             # =================================================================================== #
             #                               3. Train the generator                                #
@@ -262,8 +268,8 @@ class Solver(object):
 
                 # Logging.
                 loss['G/loss_fake'] = g_loss_fake.item()
-                loss['G/loss_rec'] = g_loss_rec.item()
                 loss['G/loss_cls_spks'] = g_loss_cls_spks.item()
+                loss['G/loss_RECONSTRCUT'] = g_loss_rec.item()
 
             # =================================================================================== #
             #                                 4. Miscellaneous                                    #
@@ -294,15 +300,15 @@ class Solver(object):
                         f0_converted = pitch_conversion(f0=f0,
                             mean_log_src=self.test_loader.logf0s_mean_src, std_log_src=self.test_loader.logf0s_std_src,
                             mean_log_target=self.test_loader.logf0s_mean_trg, std_log_target=self.test_loader.logf0s_std_trg)
-                        coded_sp = world_encode_spectral_envelop(sp=sp, fs=sampling_rate, dim=num_mcep)
+                        coded_sp = world_encode_spectral_envelop(sp=sp, fs=sampling_rate, dim=num_mcep)# to dim 36
 
                         coded_sp_norm = (coded_sp - self.test_loader.mcep_mean_src) / self.test_loader.mcep_std_src
-                        coded_sp_norm_tensor = torch.FloatTensor(coded_sp_norm.T).unsqueeze_(0).unsqueeze_(1).to(self.device)
-                        conds = torch.FloatTensor(self.test_loader.spk_c_trg).to(self.device)
+                        coded_sp_norm_tensor = torch.FloatTensor(coded_sp_norm.T).unsqueeze_(0).unsqueeze_(1).to(self.device) # [1, 1, D, T]
+                        conds = torch.FloatTensor(self.test_loader.spk_c_trg).to(self.device) # [1, C]
                         # print(conds.size())
                         coded_sp_converted_norm = self.G(coded_sp_norm_tensor, conds).data.cpu().numpy()
                         coded_sp_converted = np.squeeze(coded_sp_converted_norm).T * self.test_loader.mcep_std_trg + self.test_loader.mcep_mean_trg
-                        coded_sp_converted = np.ascontiguousarray(coded_sp_converted)
+                        coded_sp_converted = np.ascontiguousarray(coded_sp_converted) # TODO why need C contiguous
                         # decoded_sp_converted = world_decode_spectral_envelop(coded_sp = coded_sp_converted, fs = sampling_rate)
                         wav_transformed = world_speech_synthesis(f0=f0_converted, coded_sp=coded_sp_converted,
                                                                 ap=ap, fs=sampling_rate, frame_period=frame_period)
@@ -324,6 +330,7 @@ class Solver(object):
                 print('Saved model checkpoints into {}...'.format(self.model_save_dir))
 
             # Decay learning rates.
+            # linear decay
             if (i+1) % self.lr_update_step == 0 and (i+1) > (self.num_iters - self.num_iters_decay):
                 g_lr -= (self.g_lr / float(self.num_iters_decay))
                 d_lr -= (self.d_lr / float(self.num_iters_decay))

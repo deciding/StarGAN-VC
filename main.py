@@ -10,6 +10,7 @@ def str2bool(v):
 
 def main(config):
     # For fast training.
+    # This flag allows you to enable the inbuilt cudnn auto-tuner to find the best algorithm to use for your hardware.
     cudnn.benchmark = True
 
     # Create directories if not exist.
@@ -22,7 +23,7 @@ def main(config):
 
     # Data loader.
     train_loader = get_loader(config.train_data_dir, config.batch_size, 'train', num_workers=config.num_workers)
-    test_loader = TestDataset(config.test_data_dir, config.wav_dir, src_spk='p262', trg_spk='p272')
+    test_loader = TestDataset(config.test_data_dir, config.wav_dir, src_spk='p262', trg_spk='p272') # will convert to train dir...
 
     # Solver for training and testing StarGAN.
     solver = Solver(train_loader, test_loader, config)

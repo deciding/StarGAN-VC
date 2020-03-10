@@ -24,8 +24,8 @@ def resample(spk, origin_wavpath, target_wavpath):
         os.makedirs(folder_to, exist_ok=True)
         wav_to = join(folder_to, wav)
         wav_from = join(origin_wavpath, spk, wav)
-        #subprocess.call(['sox', wav_from, "-r", "16000", wav_to])
-        subprocess.call(['sox', wav_from, "-r", "24000", wav_to])
+        subprocess.call(['sox', wav_from, "-r", "16000", wav_to])
+        #subprocess.call(['sox', wav_from, "-r", "24000", wav_to])
     return 0
 
 def resample_to_16k(origin_wavpath, target_wavpath, num_workers=1):
@@ -41,7 +41,7 @@ def resample_to_16k(origin_wavpath, target_wavpath, num_workers=1):
 
 def split_data(paths):
     indices = np.arange(len(paths))
-    test_size = 0.1
+    test_size = 0.1 # make sure every speaker have utts in train data
     train_indices, test_indices = train_test_split(indices, test_size=test_size, random_state=1234)
     train_paths = list(np.array(paths)[train_indices])
     test_paths = list(np.array(paths)[test_indices])
@@ -106,9 +106,9 @@ if __name__ == '__main__':
     num_workers = argv.num_workers if argv.num_workers is not None else cpu_count()
 
     # The original wav in VCTK is 48K, first we want to resample to 16K
-    import pdb;pdb.set_trace()
+    #import pdb;pdb.set_trace()
     resample_to_16k(origin_wavpath, target_wavpath, num_workers=num_workers)
-    sys.exit(0)
+    #sys.exit(0)
 
     # WE only use 10 speakers listed below for this experiment.
     speaker_used = ['262', '272', '229', '232', '292', '293', '360', '361', '248', '251']

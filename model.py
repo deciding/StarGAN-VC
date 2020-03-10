@@ -25,14 +25,15 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         c_dim = num_speakers
         layers = []
-        layers.append(nn.Conv2d(1+c_dim, conv_dim, kernel_size=(3, 9), padding=(1, 4), bias=False))
+        # Dim conversion
+        layers.append(nn.Conv2d(1+c_dim, conv_dim, kernel_size=(3, 9), padding=(1, 4), bias=False))# NCHW, [B, C+1, D, T]
         layers.append(nn.InstanceNorm2d(conv_dim, affine=True, track_running_stats=True))
         layers.append(nn.ReLU(inplace=True))
 
         # Down-sampling layers.
         curr_dim = conv_dim
         for i in range(2):
-            layers.append(nn.Conv2d(curr_dim, curr_dim*2, kernel_size=(4, 8), stride=(2, 2), padding=(1, 3), bias=False))
+            layers.append(nn.Conv2d(curr_dim, curr_dim*2, kernel_size=(4, 8), stride=(2, 2), padding=(1, 3), bias=False)) # the padding is same padding
             layers.append(nn.InstanceNorm2d(curr_dim*2, affine=True, track_running_stats=True))
             layers.append(nn.ReLU(inplace=True))
             curr_dim = curr_dim * 2
@@ -48,14 +49,17 @@ class Generator(nn.Module):
             layers.append(nn.ReLU(inplace=True))
             curr_dim = curr_dim // 2
 
+        # Dim conversion
         layers.append(nn.Conv2d(curr_dim, 1, kernel_size=7, stride=1, padding=3, bias=False))
         self.main = nn.Sequential(*layers)
 
+    # x:[B, 1, D, T], c:[B, C]
     def forward(self, x, c):
         # Replicate spatially and concatenate domain information.
         c = c.view(c.size(0), c.size(1), 1, 1)
-        c = c.repeat(1, 1, x.size(2), x.size(3))
-        x = torch.cat([x, c], dim=1)
+        c = c.repeat(1, 1, x.size(2), x.size(3)) # c:[B, C, D, T]
+        x = torch.cat([x, c], dim=1) # x:[B, C+1, D, T] the c+1 dim will be [D, T] one matrix, others are zero matrix
+        # [B, C+1, D, T] -> [B, 1, D, T]
         return self.main(x)
 
 class Discriminator(nn.Module):
@@ -63,6 +67,7 @@ class Discriminator(nn.Module):
     def __init__(self, input_size=(36, 256), conv_dim=64, repeat_num=5, num_speakers=10):
         super(Discriminator, self).__init__()
         layers = []
+        # Dim convert & Downsample
         layers.append(nn.Conv2d(1, conv_dim, kernel_size=4, stride=2, padding=1))
         layers.append(nn.LeakyReLU(0.01))
 
@@ -75,12 +80,16 @@ class Discriminator(nn.Module):
         kernel_size_0 = int(input_size[0] / np.power(2, repeat_num)) # 1
         kernel_size_1 = int(input_size[1] / np.power(2, repeat_num)) # 8
         self.main = nn.Sequential(*layers)
+        # make it a single value
         self.conv_dis = nn.Conv2d(curr_dim, 1, kernel_size=(kernel_size_0, kernel_size_1), stride=1, padding=0, bias=False) # padding should be 0
         self.conv_clf_spks = nn.Conv2d(curr_dim, num_speakers, kernel_size=(kernel_size_0, kernel_size_1), stride=1, padding=0, bias=False)  # for num_speaker
 
     def forward(self, x):
+        # [B, 1, D, T] -> [B, 64, 18, 128] -> [B, 64*2^4, 1, 8]
         h = self.main(x)
+        # [B, 1024, 1, 8] -> [B, 1, 1, 1]
         out_src = self.conv_dis(h)
+        # [B, 1024, 1, 8] -> [B, 10, 1, 1]
         out_cls_spks = self.conv_clf_spks(h)
         return out_src, out_cls_spks.view(out_cls_spks.size(0), out_cls_spks.size(1))
 

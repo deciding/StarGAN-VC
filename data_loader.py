@@ -1,9 +1,10 @@
 from torch.utils import data
 import torch
-import os
-import random
+#import os
+#import random
 import glob
-from os.path import join, basename, dirname, split
+from os.path import join, basename
+#from os.path import dirname, split
 import numpy as np
 
 # Below is the accent info for the used 10 speakers.
@@ -17,7 +18,7 @@ spk2acc = {'262': 'Edinburgh', #F
            '361': 'AmericanNewJersey', #F
            '248': 'India', #F
            '251': 'India'} #M
-min_length = 256   # Since we slice 256 frames from each utterance when training.
+min_length = 256   # Since we slice 256 frames from each utterance when training. also is the sample len
 # Build a dict useful when we want to get one-hot representation of speakers.
 speakers = ['p262', 'p272', 'p229', 'p232', 'p292', 'p293', 'p360', 'p361', 'p248', 'p251']
 spk2idx = dict(zip(speakers, range(len(speakers))))
@@ -52,7 +53,7 @@ class MyDataset(data.Dataset):
     """Dataset for MCEP features and speaker labels."""
     def __init__(self, data_dir):
         mc_files = glob.glob(join(data_dir, '*.npy'))
-        mc_files = [i for i in mc_files if basename(i)[:4] in speakers] 
+        mc_files = [i for i in mc_files if basename(i)[:4] in speakers] #TODO HARD
         self.mc_files = self.rm_too_short_utt(mc_files)
         self.num_files = len(self.mc_files)
         print("\t Number of training samples: ", self.num_files)
@@ -60,7 +61,7 @@ class MyDataset(data.Dataset):
             mc = np.load(f)
             if mc.shape[0] <= min_length:
                 print(f)
-                raise RuntimeError(f"The data may be corrupted! We need all MCEP features having more than {min_length} frames!") 
+                raise RuntimeError(f"The data may be corrupted! We need all MCEP features having more than {min_length} frames!")
 
     def rm_too_short_utt(self, mc_files, min_length=min_length):
         new_mc_files = []
@@ -85,11 +86,10 @@ class MyDataset(data.Dataset):
         mc = np.load(filename)
         mc = self.sample_seg(mc)
         mc = np.transpose(mc, (1, 0))  # (T, D) -> (D, T), since pytorch need feature having shape
-        # to one-hot
+        # to one-hot [batch]
         spk_cat = np.squeeze(to_categorical([spk_idx], num_classes=len(speakers)))
 
         return torch.FloatTensor(mc), torch.LongTensor([spk_idx]).squeeze_(), torch.FloatTensor(spk_cat)
-        
 
 class TestDataset(object):
     """Dataset for testing."""
@@ -100,7 +100,8 @@ class TestDataset(object):
 
         self.src_spk_stats = np.load(join(data_dir.replace('test', 'train'), '{}_stats.npz'.format(src_spk)))
         self.trg_spk_stats = np.load(join(data_dir.replace('test', 'train'), '{}_stats.npz'.format(trg_spk)))
-        
+
+        #stats, src_wav_dir, spk_c_trg
         self.logf0s_mean_src = self.src_spk_stats['log_f0s_mean']
         self.logf0s_std_src = self.src_spk_stats['log_f0s_std']
         self.logf0s_mean_trg = self.trg_spk_stats['log_f0s_mean']
@@ -118,10 +119,11 @@ class TestDataset(object):
         batch_data = []
         for i in range(batch_size):
             mcfile = self.mc_files[i]
-            filename = basename(mcfile).split('-')[-1]
+            filename = basename(mcfile).split('-')[-1]# why split
             wavfile_path = join(self.src_wav_dir, filename.replace('npy', 'wav'))
             batch_data.append(wavfile_path)
-        return batch_data       
+        # return wavs
+        return batch_data
 
 def get_loader(data_dir, batch_size=32, mode='train', num_workers=1):
     dataset = MyDataset(data_dir)
