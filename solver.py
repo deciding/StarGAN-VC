@@ -314,11 +314,28 @@ class Solver(object):
                                                                 ap=ap, fs=sampling_rate, frame_period=frame_period)
 
                         librosa.output.write_wav(
-                            join(self.sample_dir, str(i+1)+'-'+wav_name.split('.')[0]+'-vcto-{}'.format(self.test_loader.trg_spk)+'.wav'), wav_transformed, sampling_rate)
+                            join(self.sample_dir,
+                                '{}-{}_{}-vcto-{}.wav'.format(
+                                    str(i+1),
+                                    self.test_loader.src_spk,
+                                    wav_name.split('.')[0],
+                                    self.test_loader.trg_spk
+                                    )
+                                ),
+                             wav_transformed,
+                             sampling_rate)
                         if cpsyn_flag:
                             wav_cpsyn = world_speech_synthesis(f0=f0, coded_sp=coded_sp,
                                                         ap=ap, fs=sampling_rate, frame_period=frame_period)
-                            librosa.output.write_wav(join(self.sample_dir, 'cpsyn-'+wav_name), wav_cpsyn, sampling_rate)
+                            librosa.output.write_wav(
+                                    join(self.sample_dir,
+                                        'cpsyn-{}_{}'.format(
+                                            self.test_loader.src_spk,
+                                            wav_name
+                                            )
+                                        ),
+                                    wav_cpsyn,
+                                    sampling_rate)
                     cpsyn_flag = False
 
             # Save model checkpoints.

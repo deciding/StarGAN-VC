@@ -1,3 +1,4 @@
+import math
 import librosa
 import numpy as np
 #import os
@@ -31,6 +32,8 @@ def world_decode_spectral_envelop(coded_sp, fs):
 
 def world_encode_wav(wav_file, fs, frame_period=5.0, coded_dim=36):
     wav = load_wav(wav_file, sr=fs)
+    min_len=math.ceil(256*frame_period/1000.0*fs)
+    wav=np.pad( wav, (0, max(0, min_len-len(wav))) )
     f0, timeaxis, sp, ap = world_decompose(wav=wav, fs=fs, frame_period=frame_period)
     coded_sp = world_encode_spectral_envelop(sp = sp, fs = fs, dim = coded_dim)
     return f0, timeaxis, sp, ap, coded_sp

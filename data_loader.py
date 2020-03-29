@@ -3,25 +3,18 @@ import torch
 #import os
 #import random
 import glob
-from os.path import join, basename
+from os.path import join, basename, dirname, exists
 #from os.path import dirname, split
 import numpy as np
+import pickle
 
 # Below is the accent info for the used 10 speakers.
-spk2acc = {'262': 'Edinburgh', #F
-           '272': 'Edinburgh', #M
-           '229': 'SouthEngland', #F 
-           '232': 'SouthEngland', #M
-           '292': 'NorthernIrishBelfast', #M 
-           '293': 'NorthernIrishBelfast', #F 
-           '360': 'AmericanNewJersey', #M
-           '361': 'AmericanNewJersey', #F
-           '248': 'India', #F
-           '251': 'India'} #M
 min_length = 256   # Since we slice 256 frames from each utterance when training. also is the sample len
 # Build a dict useful when we want to get one-hot representation of speakers.
-speakers = ['p262', 'p272', 'p229', 'p232', 'p292', 'p293', 'p360', 'p361', 'p248', 'p251']
-spk2idx = dict(zip(speakers, range(len(speakers))))
+vctk_speakers = ['p262', 'p272', 'p229', 'p232', 'p292', 'p293', 'p360', 'p361', 'p248', 'p251']
+vctk_spk2idx = dict(zip(vctk_speakers, range(len(vctk_speakers))))
+vcc2018_speakers = ['VCC2SF1', 'VCC2SF2', 'VCC2SM1', 'VCC2SM2']
+vcc2018_spk2idx = dict(zip(vcc2018_speakers, range(len(vcc2018_speakers))))
 
 def to_categorical(y, num_classes=None):
     """Converts a class vector (integers) to binary class matrix.
@@ -52,9 +45,27 @@ def to_categorical(y, num_classes=None):
 class MyDataset(data.Dataset):
     """Dataset for MCEP features and speaker labels."""
     def __init__(self, data_dir):
-        mc_files = glob.glob(join(data_dir, '*.npy'))
-        mc_files = [i for i in mc_files if basename(i)[:4] in speakers] #TODO HARD
-        self.mc_files = self.rm_too_short_utt(mc_files)
+        if 'vcc2018' in data_dir:
+            self.speakers=vcc2018_speakers
+            self.spk2idx=vcc2018_spk2idx
+        else:
+            self.speakers=vctk_speakers
+            self.spk2idx=vctk_spk2idx
+
+        mc_pickle_filename='mc_files.pickle'
+        mc_files_pickle=join(data_dir, mc_pickle_filename)
+        #if False:
+        if exists(mc_files_pickle):
+            with open(mc_files_pickle, 'rb') as f:
+                self.mc_files=pickle.load(f)
+        else:
+            mc_files = glob.glob(join(data_dir, '*', '*.npy'))
+            mc_files = [i for i in mc_files if basename(dirname(i)) in self.speakers]
+            self.mc_files = self.rm_too_short_utt(mc_files)
+            #import pdb;pdb.set_trace()
+            with open(mc_files_pickle, 'wb') as f:
+                pickle.dump(self.mc_files, f)
+        #random.shuffle(self.mc_files)
         self.num_files = len(self.mc_files)
         print("\t Number of training samples: ", self.num_files)
         for f in self.mc_files:
@@ -69,6 +80,8 @@ class MyDataset(data.Dataset):
             mc = np.load(mcfile)
             if mc.shape[0] > min_length:
                 new_mc_files.append(mcfile)
+            else:
+                print("%s is eliminated, since it is too short" % mcfile)
         return new_mc_files
 
     def sample_seg(self, feat, sample_len=min_length):
@@ -81,25 +94,33 @@ class MyDataset(data.Dataset):
 
     def __getitem__(self, index):
         filename = self.mc_files[index]
-        spk = basename(filename).split('_')[0]
-        spk_idx = spk2idx[spk]
+        spk = basename(dirname(filename))
+        spk_idx = self.spk2idx[spk]
         mc = np.load(filename)
         mc = self.sample_seg(mc)
         mc = np.transpose(mc, (1, 0))  # (T, D) -> (D, T), since pytorch need feature having shape
         # to one-hot [batch]
-        spk_cat = np.squeeze(to_categorical([spk_idx], num_classes=len(speakers)))
+        spk_cat = np.squeeze(to_categorical([spk_idx], num_classes=len(self.speakers)))
 
+        # source speech, speaker id, speaker id one hot
         return torch.FloatTensor(mc), torch.LongTensor([spk_idx]).squeeze_(), torch.FloatTensor(spk_cat)
 
 class TestDataset(object):
     """Dataset for testing."""
-    def __init__(self, data_dir, wav_dir, src_spk='p262', trg_spk='p272'):
+    def __init__(self, data_dir, wav_dir, src_spk='VCC2SM1', trg_spk='VCC2SF1'):
+        if 'vcc2018' in data_dir:
+            self.speakers=vcc2018_speakers
+            self.spk2idx=vcc2018_spk2idx
+        else:
+            self.speakers=vctk_speakers
+            self.spk2idx=vctk_spk2idx
+
         self.src_spk = src_spk
         self.trg_spk = trg_spk
-        self.mc_files = sorted(glob.glob(join(data_dir, '{}*.npy'.format(self.src_spk))))
+        self.mc_files = sorted(glob.glob(join(data_dir, self.src_spk, '*.npy')))
 
-        self.src_spk_stats = np.load(join(data_dir.replace('test', 'train'), '{}_stats.npz'.format(src_spk)))
-        self.trg_spk_stats = np.load(join(data_dir.replace('test', 'train'), '{}_stats.npz'.format(trg_spk)))
+        self.src_spk_stats = np.load(join(data_dir.replace('test', 'train'), self.src_spk, '{}_stats.npz'.format(src_spk)))
+        self.trg_spk_stats = np.load(join(data_dir.replace('test', 'train'), self.trg_spk, '{}_stats.npz'.format(trg_spk)))
 
         #stats, src_wav_dir, spk_c_trg
         self.logf0s_mean_src = self.src_spk_stats['log_f0s_mean']
@@ -111,15 +132,16 @@ class TestDataset(object):
         self.mcep_mean_trg = self.trg_spk_stats['coded_sps_mean']
         self.mcep_std_trg = self.trg_spk_stats['coded_sps_std']
         self.src_wav_dir = f'{wav_dir}/{src_spk}'
-        self.spk_idx = spk2idx[trg_spk]
-        spk_cat = to_categorical([self.spk_idx], num_classes=len(speakers))
+        self.spk_idx = self.spk2idx[trg_spk]
+        spk_cat = to_categorical([self.spk_idx], num_classes=len(self.speakers))
         self.spk_c_trg = spk_cat
 
     def get_batch_test_data(self, batch_size=8):
         batch_data = []
         for i in range(batch_size):
             mcfile = self.mc_files[i]
-            filename = basename(mcfile).split('-')[-1]# why split
+            #filename = basename(mcfile).split('-')[-1]# why split
+            filename=basename(mcfile)
             wavfile_path = join(self.src_wav_dir, filename.replace('npy', 'wav'))
             batch_data.append(wavfile_path)
         # return wavs
