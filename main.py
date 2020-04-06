@@ -31,33 +31,49 @@ def main(config):
         src_spk='p262'
         trg_spk='p272'
     # Data loader.
-    train_loader = get_loader(config.train_data_dir, config.batch_size, 'train', num_workers=config.num_workers)
-    test_loader = TestDataset(config.test_data_dir, config.wav_dir, src_spk=src_spk, trg_spk=trg_spk) # will convert to train dir...
+    train_loader = get_loader(config.train_data_dir, config.batch_size, 'train', num_workers=config.num_workers, version=config.version)
+    test_loader = TestDataset(config.test_data_dir, config.wav_dir, src_spk=src_spk, trg_spk=trg_spk, version=config.version) # will convert to train dir...
 
     # Solver for training and testing StarGAN.
     solver = Solver(train_loader, test_loader, config)
 
     if config.mode == 'train':
-        solver.train()
+        if config.version=='v2':
+            solver.trainv2()
+        elif config.version=='v1':
+            solver.train()
 
     # elif config.mode == 'test':
     #     solver.test()
 
 
 if __name__ == '__main__':
+    # some configs that are different between v2 and v1
+    version='v1'
+    if version=='v2':
+        lambda_cls0=1
+        g_lr0=0.0002
+        num_iters0=300000
+    else:
+        lambda_cls0=10
+        g_lr0=0.0001
+        num_iters0=200000
     parser = argparse.ArgumentParser()
 
+    parser.add_argument('--version', type=str, default='v2')
     # Model configuration.
-    parser.add_argument('--lambda_cls', type=float, default=10, help='weight for domain classification loss')
+    parser.add_argument('--lambda_cls', type=float, default=lambda_cls0, help='weight for domain classification loss')
     parser.add_argument('--lambda_rec', type=float, default=10, help='weight for reconstruction loss')
+    parser.add_argument('--lambda_id', type=float, default=5, help='weight for reconstruction loss')
     parser.add_argument('--lambda_gp', type=float, default=10, help='weight for gradient penalty')
     parser.add_argument('--sampling_rate', type=int, default=16000, help='sampling rate')
 
     # Training configuration.
     parser.add_argument('--batch_size', type=int, default=32, help='mini-batch size')
-    parser.add_argument('--num_iters', type=int, default=200000, help='number of total iterations for training D')
+    parser.add_argument('--num_iters', type=int, default=num_iters0, help='number of total iterations for training D')
     parser.add_argument('--num_iters_decay', type=int, default=100000, help='number of iterations for decaying lr')
-    parser.add_argument('--g_lr', type=float, default=0.0001, help='learning rate for G')
+    parser.add_argument('--id_step_range', type=int, default=10000, help='number of iterations before which we need id loss')
+    parser.add_argument('--g_lr', type=float, default=g_lr0, help='learning rate for G')
     parser.add_argument('--d_lr', type=float, default=0.0001, help='learning rate for D')
     parser.add_argument('--n_critic', type=int, default=5, help='number of D updates per each G update')
     parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for Adam optimizer')
@@ -102,6 +118,9 @@ if __name__ == '__main__':
         config.test_data_dir='data/mc/test'
         config.wav_dir='data/VCTK-Corpus/wav16'
         config.num_speakers=10
+
+    config.version=version
+
 
     print(config)
     main(config)

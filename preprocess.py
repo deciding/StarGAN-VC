@@ -135,8 +135,8 @@ if __name__ == '__main__':
         mc_dir_train= './vcc2018/mc_vcc2018/train'
         mc_dir_test= './vcc2018/mc_vcc2018/test'
         # The original wav in VCC2018 is 22.05K, first we want to resample to 16K
-        resample_to_16k(origin_wavpath, target_wavpath, num_workers=num_workers)
-        resample_to_16k(origin_wavpath_test, target_wavpath_test, num_workers=num_workers)
+        #resample_to_16k(origin_wavpath, target_wavpath, num_workers=num_workers)
+        #resample_to_16k(origin_wavpath_test, target_wavpath_test, num_workers=num_workers)
         #sys.exit(0)
 
 
