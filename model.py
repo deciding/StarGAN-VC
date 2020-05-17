@@ -128,8 +128,8 @@ class ConditionalInstanceNormWithRunningStats(nn.Module):
     def __init__(self, input_dim, dim_domain, eps=1e-05, momentum=0.1):
         super().__init__()
         self.norm = nn.InstanceNorm2d(input_dim, eps=eps, momentum=momentum, affine=False, track_running_stats=True)
-        self.w_embedding=nn.Linear(dim_domain, input_dim)
-        self.b_embedding=nn.Linear(dim_domain, input_dim)
+        self.w_embedding=nn.Linear(dim_domain, input_dim, bias=True)
+        self.b_embedding=nn.Linear(dim_domain, input_dim, bias=True)
         #w=torch.empty(dim_domain, input_dim)
         #b=torch.empty(dim_domain, input_dim)
         #nn.init.xavier_uniform_(w)
@@ -141,11 +141,14 @@ class ConditionalInstanceNormWithRunningStats(nn.Module):
     # [B, C, 1, T], [B, Cat1*Cat2] | [Cat2*Cat1, C]
     # output: [B, C, 1, T]
     def forward(self, x, c):
-        h, w=x.size()[-2], x.size()[-1]
-        self.gamma=self.w_embedding(c).unsqueeze_(2).unsqueeze_(3)
-        self.gamma=self.gamma.expand(-1, -1, h, w)
-        self.beta=self.b_embedding(c).unsqueeze_(2).unsqueeze_(3)
-        self.beta=self.beta.expand(-1, -1, h, w)
+        #h, w=x.size()[-2], x.size()[-1]
+        #self.gamma=self.w_embedding(c).unsqueeze_(2).unsqueeze_(3)
+        #self.gamma=self.gamma.expand(-1, -1, h, w)
+        #self.beta=self.b_embedding(c).unsqueeze_(2).unsqueeze_(3)
+        #self.beta=self.beta.expand(-1, -1, h, w)
+        batch_size=c.size()[0]
+        self.gamma=self.w_embedding(c).view(batch_size, -1, 1, 1)
+        self.beta=self.b_embedding(c).view(batch_size, -1, 1, 1)
         out = self.norm(x)
         out = self.gamma * out + self.beta
         return out
@@ -589,7 +592,7 @@ class ResidualBlockGradualV2B(nn.Module):
 # 2-1-2D
 class GeneratorGradualV2B(nn.Module):
     """Generator network."""
-    def __init__(self, input_size=(36, 128), conv_dim=64, num_speakers=10, repeat_num=6):
+    def __init__(self, input_size=(36, 256), conv_dim=64, num_speakers=10, repeat_num=6):
         super(GeneratorGradualV2B, self).__init__()
         c_dim = num_speakers
         # Dim conversion
@@ -609,7 +612,9 @@ class GeneratorGradualV2B(nn.Module):
         curr_dim = curr_dim * 2
 
         # 2-1D
-        self.convert_2d_1d=Convert_2D_1D(reshape_channels=int(curr_dim*input_size[0]/4), out_channels=curr_dim)
+        #self.convert_2d_1d=Convert_2D_1D(reshape_channels=int(curr_dim*input_size[0]/4), out_channels=curr_dim)
+        self.convert_2d_1d=Convert_2D_1D(reshape_channels=int(curr_dim*input_size[0]/4), out_channels=curr_dim*2)
+        curr_dim*=2
 
         # Bottleneck layers.
         self.res_block1=ResidualBlockGradualV2B(dim_in=curr_dim, dim_out=curr_dim, kernel_size=(1, 3), padding=(0, 1))
@@ -620,7 +625,9 @@ class GeneratorGradualV2B(nn.Module):
         self.res_block6=ResidualBlockGradualV2B(dim_in=curr_dim, dim_out=curr_dim, kernel_size=(1, 3), padding=(0, 1))
 
         # 1-2D
-        self.convert_1d_2d=Convert_1D_2D(in_channels=curr_dim, hidden_channels=int(curr_dim*input_size[0]/4), out_channels=curr_dim)
+        curr_dim=int(curr_dim/2)
+        #self.convert_1d_2d=Convert_1D_2D(in_channels=curr_dim, hidden_channels=int(curr_dim*input_size[0]/4), out_channels=curr_dim)
+        self.convert_1d_2d=Convert_1D_2D(in_channels=curr_dim*2, hidden_channels=int(curr_dim*input_size[0]/4), out_channels=curr_dim)
 
         # Up-sampling layers.
         self.up_conv1=nn.ConvTranspose2d(curr_dim, curr_dim//2, kernel_size=4, stride=2, padding=1, bias=False)
@@ -670,6 +677,208 @@ class GeneratorGradualV2B(nn.Module):
         x_conv2_up=self.up_conv2(x_act1_up)
         x_in2_up=self.up_in2(x_conv2_up)
         x_act2_up=self.up_act2(x_in2_up)
+
+        x_out=self.conv_out(x_act2_up)
+
+        return x_out
+
+# 9 2-1-2D
+class GeneratorGradualV2B9(nn.Module):
+    """Generator network."""
+    def __init__(self, input_size=(36, 256), conv_dim=64, num_speakers=10, repeat_num=6):
+        super(GeneratorGradualV2B9, self).__init__()
+        c_dim = num_speakers
+        # Dim conversion
+        self.conv_in=nn.Conv2d(1+c_dim, conv_dim, kernel_size=(3, 9), padding=(1, 4), bias=False)# NCHW, [B, C+1, D, T]
+        self.in1=nn.InstanceNorm2d(conv_dim, affine=True, track_running_stats=True)
+        self.act1=nn.ReLU(inplace=True)
+
+        # Down-sampling layers.
+        curr_dim = conv_dim
+        self.down_conv1=nn.Conv2d(curr_dim, curr_dim*2, kernel_size=(4, 8), stride=(2, 2), padding=(1, 3), bias=False) # the padding is same padding
+        self.down_in1=nn.InstanceNorm2d(curr_dim*2, affine=True, track_running_stats=True)
+        self.down_act1=nn.ReLU(inplace=True)
+        curr_dim = curr_dim * 2
+        self.down_conv2=nn.Conv2d(curr_dim, curr_dim*2, kernel_size=(4, 8), stride=(2, 2), padding=(1, 3), bias=False) # the padding is same padding
+        self.down_in2=nn.InstanceNorm2d(curr_dim*2, affine=True, track_running_stats=True)
+        self.down_act2=nn.ReLU(inplace=True)
+        curr_dim = curr_dim * 2
+
+        # 2-1D
+        self.convert_2d_1d=Convert_2D_1D(reshape_channels=int(curr_dim*input_size[0]/4), out_channels=curr_dim)
+
+        # Bottleneck layers.
+        self.res_block1=ResidualBlockGradualV2B(dim_in=curr_dim, dim_out=curr_dim, kernel_size=(1, 3), padding=(0, 1))
+        self.res_block2=ResidualBlockGradualV2B(dim_in=curr_dim, dim_out=curr_dim, kernel_size=(1, 3), padding=(0, 1))
+        self.res_block3=ResidualBlockGradualV2B(dim_in=curr_dim, dim_out=curr_dim, kernel_size=(1, 3), padding=(0, 1))
+        self.res_block4=ResidualBlockGradualV2B(dim_in=curr_dim, dim_out=curr_dim, kernel_size=(1, 3), padding=(0, 1))
+        self.res_block5=ResidualBlockGradualV2B(dim_in=curr_dim, dim_out=curr_dim, kernel_size=(1, 3), padding=(0, 1))
+        self.res_block6=ResidualBlockGradualV2B(dim_in=curr_dim, dim_out=curr_dim, kernel_size=(1, 3), padding=(0, 1))
+        self.res_block7=ResidualBlockGradualV2B(dim_in=curr_dim, dim_out=curr_dim, kernel_size=(1, 3), padding=(0, 1))
+        self.res_block8=ResidualBlockGradualV2B(dim_in=curr_dim, dim_out=curr_dim, kernel_size=(1, 3), padding=(0, 1))
+        self.res_block9=ResidualBlockGradualV2B(dim_in=curr_dim, dim_out=curr_dim, kernel_size=(1, 3), padding=(0, 1))
+
+        # 1-2D
+        self.convert_1d_2d=Convert_1D_2D(in_channels=curr_dim, hidden_channels=int(curr_dim*input_size[0]/4), out_channels=curr_dim)
+
+        # Up-sampling layers.
+        self.up_conv1=nn.ConvTranspose2d(curr_dim, curr_dim//2, kernel_size=4, stride=2, padding=1, bias=False)
+        self.up_in1=nn.InstanceNorm2d(curr_dim//2, affine=True, track_running_stats=True)
+        self.up_act1=nn.ReLU(inplace=True)
+        curr_dim = curr_dim // 2
+        self.up_conv2=nn.ConvTranspose2d(curr_dim, curr_dim//2, kernel_size=4, stride=2, padding=1, bias=False)
+        self.up_in2=nn.InstanceNorm2d(curr_dim//2, affine=True, track_running_stats=True)
+        self.up_act2=nn.ReLU(inplace=True)
+        curr_dim = curr_dim // 2
+
+        # Dim conversion
+        self.conv_out=nn.Conv2d(curr_dim, 1, kernel_size=7, stride=1, padding=3, bias=False)
+
+    # x:[B, 1, D, T], c:[B, C]
+    def forward(self, x, c):
+        # Replicate spatially and concatenate domain information.
+        c = c.view(c.size(0), c.size(1), 1, 1)
+        c = c.repeat(1, 1, x.size(2), x.size(3)) # c:[B, C, D, T]
+        x = torch.cat([x, c], dim=1) # x:[B, C+1, D, T] the c+1 dim will be [D, T] one matrix, others are zero matrix
+        # [B, C+1, D, T] -> [B, 1, D, T]
+        x_conv_in=self.conv_in(x)
+        x_in_in=self.in1(x_conv_in)
+        x_act_in=self.act1(x_in_in)
+
+        x_conv1_down=self.down_conv1(x_act_in)
+        x_in1_down=self.down_in1(x_conv1_down)
+        x_act1_down=self.down_act1(x_in1_down)
+        x_conv2_down=self.down_conv2(x_act1_down)
+        x_in2_down=self.down_in2(x_conv2_down)
+        x_act2_down=self.down_act2(x_in2_down)
+
+        x_1d=self.convert_2d_1d(x_act2_down)
+
+        x_res=self.res_block1(x_1d)
+        x_res=self.res_block2(x_res)
+        x_res=self.res_block3(x_res)
+        x_res=self.res_block4(x_res)
+        x_res=self.res_block5(x_res)
+        x_res=self.res_block6(x_res)
+        x_res=self.res_block7(x_res)
+        x_res=self.res_block8(x_res)
+        x_res=self.res_block9(x_res)
+
+        x_2d=self.convert_1d_2d(x_res)
+
+        x_conv1_up=self.up_conv1(x_2d)
+        x_in1_up=self.up_in1(x_conv1_up)
+        x_act1_up=self.up_act1(x_in1_up)
+        x_conv2_up=self.up_conv2(x_act1_up)
+        x_in2_up=self.up_in2(x_conv2_up)
+        x_act2_up=self.up_act2(x_in2_up)
+
+        x_out=self.conv_out(x_act2_up)
+
+        return x_out
+
+# CIN
+class ResidualBlockGradualV2C(nn.Module):
+    """Residual Block with instance normalization."""
+    def __init__(self, dim_in, dim_out):
+        super(ResidualBlockGradualV2C, self).__init__()
+        self.conv1=nn.Conv2d(dim_in, dim_out, kernel_size=3, stride=1, padding=1, bias=False)
+        self.cin1=ConditionalInstanceNormWithRunningStats(dim_out, dim_domain=4)
+        #self.relu=nn.ReLU(inplace=True)
+        self.relu=nn.ReLU()
+        self.conv2=nn.Conv2d(dim_out, dim_out, kernel_size=3, stride=1, padding=1, bias=False)
+        self.cin2=ConditionalInstanceNormWithRunningStats(dim_out, dim_domain=4)
+
+    # [B, C, 1, T], [B, Cat]
+    def forward(self, x, c):
+        x1=self.conv1(x)
+        x1=self.cin1(x1, c)
+        x1=self.relu(x1)
+        x1=self.conv2(x1)
+        x1=self.cin2(x1, c)
+
+        return x + x1
+
+# CIN
+class GeneratorGradualV2C(nn.Module):
+    """Generator network."""
+    def __init__(self, conv_dim=64, num_speakers=10, repeat_num=6):
+        super(GeneratorGradualV2C, self).__init__()
+        #c_dim = num_speakers
+        # Dim conversion
+        #self.conv_in=nn.Conv2d(1+c_dim, conv_dim, kernel_size=(3, 9), padding=(1, 4), bias=False)# NCHW, [B, C+1, D, T]
+        self.conv_in=nn.Conv2d(1, conv_dim, kernel_size=(3, 9), padding=(1, 4), bias=False)# NCHW, [B, C+1, D, T]
+        self.in1=nn.InstanceNorm2d(conv_dim, affine=True, track_running_stats=True)
+        self.act1=nn.ReLU(inplace=True)
+
+        # Down-sampling layers.
+        curr_dim = conv_dim
+        self.down_conv1=nn.Conv2d(curr_dim, curr_dim*2, kernel_size=(4, 8), stride=(2, 2), padding=(1, 3), bias=False) # the padding is same padding
+        self.down_in1=nn.InstanceNorm2d(curr_dim*2, affine=True, track_running_stats=True)
+        self.down_act1=nn.ReLU(inplace=True)
+        curr_dim = curr_dim * 2
+        self.down_conv2=nn.Conv2d(curr_dim, curr_dim*2, kernel_size=(4, 8), stride=(2, 2), padding=(1, 3), bias=False) # the padding is same padding
+        self.down_in2=nn.InstanceNorm2d(curr_dim*2, affine=True, track_running_stats=True)
+        self.down_act2=nn.ReLU(inplace=True)
+        curr_dim = curr_dim * 2
+
+        # Bottleneck layers.
+        self.res_block1=ResidualBlockGradualV2C(dim_in=curr_dim, dim_out=curr_dim)
+        self.res_block2=ResidualBlockGradualV2C(dim_in=curr_dim, dim_out=curr_dim)
+        self.res_block3=ResidualBlockGradualV2C(dim_in=curr_dim, dim_out=curr_dim)
+        self.res_block4=ResidualBlockGradualV2C(dim_in=curr_dim, dim_out=curr_dim)
+        self.res_block5=ResidualBlockGradualV2C(dim_in=curr_dim, dim_out=curr_dim)
+        self.res_block6=ResidualBlockGradualV2C(dim_in=curr_dim, dim_out=curr_dim)
+
+        # Up-sampling layers.
+        self.up_conv1=nn.ConvTranspose2d(curr_dim, curr_dim//2, kernel_size=4, stride=2, padding=1, bias=False)
+        self.up_in1=nn.InstanceNorm2d(curr_dim//2, affine=True, track_running_stats=True)
+        self.up_act1=nn.ReLU(inplace=True)
+        curr_dim = curr_dim // 2
+        self.up_conv2=nn.ConvTranspose2d(curr_dim, curr_dim//2, kernel_size=4, stride=2, padding=1, bias=False)
+        self.up_in2=nn.InstanceNorm2d(curr_dim//2, affine=True, track_running_stats=True)
+        self.up_act2=nn.ReLU(inplace=True)
+        curr_dim = curr_dim // 2
+
+        # Dim conversion
+        self.conv_out=nn.Conv2d(curr_dim, 1, kernel_size=7, stride=1, padding=3, bias=False)
+
+    # x:[B, 1, D, T], c:[B, C]
+    def forward(self, x, c):
+        # Replicate spatially and concatenate domain information.
+        #c = c.view(c.size(0), c.size(1), 1, 1)
+        #c = c.repeat(1, 1, x.size(2), x.size(3)) # c:[B, C, D, T]
+        #x = torch.cat([x, c], dim=1) # x:[B, C+1, D, T] the c+1 dim will be [D, T] one matrix, others are zero matrix
+        # [B, C+1, D, T] -> [B, 1, D, T]
+        x_conv_in=self.conv_in(x)
+        x_in_in=self.in1(x_conv_in)
+        x_act_in=self.act1(x_in_in)
+
+        x_conv1_down=self.down_conv1(x_act_in)
+        x_in1_down=self.down_in1(x_conv1_down)
+        x_act1_down=self.down_act1(x_in1_down)
+        x_conv2_down=self.down_conv2(x_act1_down)
+        x_in2_down=self.down_in2(x_conv2_down)
+        x_act2_down=self.down_act2(x_in2_down)
+
+        x_res=self.res_block1(x_act2_down, c)
+        x_res=self.res_block2(x_res, c)
+        x_res=self.res_block3(x_res, c)
+        x_res=self.res_block4(x_res, c)
+        x_res=self.res_block5(x_res, c)
+        x_res=self.res_block6(x_res, c)
+
+        x_conv1_up=self.up_conv1(x_res)
+        x_in1_up=self.up_in1(x_conv1_up)
+        x_act1_up=self.up_act1(x_in1_up)
+        x_conv2_up=self.up_conv2(x_act1_up)
+        x_in2_up=self.up_in2(x_conv2_up)
+        x_act2_up=self.up_act2(x_in2_up)
+
+        #x_conv1_up=self.up_conv1(x_res)
+        #x_act1_up=self.up_act1(x_conv1_up)
+        #x_conv2_up=self.up_conv2(x_act1_up)
+        #x_act2_up=self.up_act2(x_conv2_up)
 
         x_out=self.conv_out(x_act2_up)
 

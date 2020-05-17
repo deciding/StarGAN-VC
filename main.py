@@ -72,6 +72,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=32, help='mini-batch size')
     parser.add_argument('--num_iters', type=int, default=num_iters0, help='number of total iterations for training D')
     parser.add_argument('--num_iters_decay', type=int, default=100000, help='number of iterations for decaying lr')
+    parser.add_argument('--lr_start_decay_step', type=int, default=80000)
+    parser.add_argument('--lr_decay_rate', type=int, default=0.98)
     parser.add_argument('--id_step_range', type=int, default=10000, help='number of iterations before which we need id loss')
     parser.add_argument('--g_lr', type=float, default=g_lr0, help='learning rate for G')
     parser.add_argument('--d_lr', type=float, default=0.0001, help='learning rate for D')

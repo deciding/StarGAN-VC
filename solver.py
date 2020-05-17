@@ -1,6 +1,8 @@
 #from model import Generator
-#from model import GeneratorGradual
-from model import GeneratorGradualV2B
+#from model import GeneratorGradualV1
+#from model import GeneratorGradualV2B
+#from model import GeneratorGradualV2B9
+from model import GeneratorGradualV2C
 
 from model import GeneratorV2
 from model import Discriminator
@@ -43,6 +45,8 @@ class Solver(object):
         self.batch_size = config.batch_size
         self.num_iters = config.num_iters
         self.num_iters_decay = config.num_iters_decay
+        self.lr_start_decay_step = config.num_iters_decay
+        self.lr_decay_rate = config.lr_decay_rate
         self.id_step_range = config.id_step_range
         self.g_lr = config.g_lr
         self.d_lr = config.d_lr
@@ -84,7 +88,9 @@ class Solver(object):
         """Create a generator and a discriminator."""
         #self.G = Generator(num_speakers=self.num_speakers)
         #self.G = GeneratorV2(dim_domain=self.num_speakers)
-        self.G = GeneratorGradualV2B(num_speakers=self.num_speakers)
+        #self.G = GeneratorGradualV2B(num_speakers=self.num_speakers)
+        #self.G = GeneratorGradualV2B9(num_speakers=self.num_speakers)
+        self.G = GeneratorGradualV2C(num_speakers=self.num_speakers)
         self.D = Discriminator(num_speakers=self.num_speakers)
 
         self.g_optimizer = torch.optim.Adam(self.G.parameters(), self.g_lr, [self.beta1, self.beta2])
@@ -395,6 +401,11 @@ class Solver(object):
                 d_lr -= (self.d_lr / float(self.num_iters_decay))
                 self.update_lr(g_lr, d_lr)
                 print ('Decayed learning rates, g_lr: {}, d_lr: {}.'.format(g_lr, d_lr))
+            #if (i+1) % self.lr_update_step == 0 and (i+1) > self.lr_start_decay_step:
+            #    g_lr *= self.lr_decay_rate
+            #    d_lr *= self.lr_decay_rate
+            #    self.update_lr(g_lr, d_lr)
+            #    print('Decayed learning rates, g_lr: {}, d_lr: {}.'.format(g_lr, d_lr))
 
 
     def trainv2(self):
@@ -589,12 +600,21 @@ class Solver(object):
                 torch.save(self.D.state_dict(), D_path)
                 print('Saved model checkpoints into {}...'.format(self.model_save_dir))
 
-            # Decay learning rates.
-            # linear decay
-            if (i+1) % self.lr_update_step == 0 and (i+1) > (self.num_iters - self.num_iters_decay):
-                g_lr -= (self.g_lr / float(self.num_iters_decay))
-                d_lr -= (self.d_lr / float(self.num_iters_decay))
+            ## Decay learning rates.
+            ## linear decay
+            ## original: 100,000 lr, 100,000 decay
+            ##decay only on every 1000 step, each time reduce 1/100,000, total 100 times
+            ##thus in total will reduce 1/1000 of lr
+            #if (i+1) % self.lr_update_step == 0 and (i+1) > (self.num_iters - self.num_iters_decay):
+            #    g_lr -= (self.g_lr / float(self.num_iters_decay))
+            #    d_lr -= (self.d_lr / float(self.num_iters_decay))
+            #    #g_lr -= (self.g_lr / float(self.num_iters_decay) * self.lr_update_step)
+            #    #d_lr -= (self.d_lr / float(self.num_iters_decay) * self.lr_update_step)
+            #    self.update_lr(g_lr, d_lr)
+            #    print('Decayed learning rates, g_lr: {}, d_lr: {}.'.format(g_lr, d_lr))
+
+            if (i+1) % self.lr_update_step == 0 and (i+1) > self.lr_start_decay_step:
+                g_lr *= self.lr_decay_rate
+                d_lr *= self.lr_decay_rate
                 self.update_lr(g_lr, d_lr)
-                print ('Decayed learning rates, g_lr: {}, d_lr: {}.'.format(g_lr, d_lr))
-
-
+                print('Decayed learning rates, g_lr: {}, d_lr: {}.'.format(g_lr, d_lr))
